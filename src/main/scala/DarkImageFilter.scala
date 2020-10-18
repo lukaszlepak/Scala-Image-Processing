@@ -6,6 +6,7 @@ import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.util.Try
 
 
 case class Config(inputDirectory: String, outputDirectory: String, threshold: Int)
@@ -19,7 +20,7 @@ object DarkImageFilter extends App {
     100 - (brightness * 100 / 255).toInt
   }
 
-  def processImage(nameWithExtension: String, image: ImmutableImage): Future[Unit] = Future {
+  def processImage(nameWithExtension: String, image: ImmutableImage, threshold: Int, outputDirectory: String): Future[Unit] = Future {
     val (name, extension) = nameWithExtension.split('.') match {
       case Array(n, e) => (n, e)
     }
@@ -27,29 +28,32 @@ object DarkImageFilter extends App {
     val imageDarknessScore = imageDarkness(image)
 
     val imageNameWithScore = {
-      if (imageDarknessScore < config.threshold)
+      if (imageDarknessScore < threshold)
         s"/${name}_bright_$imageDarknessScore"
       else
         s"/${name}_dark_$imageDarknessScore"
     }
 
     extension match {
-      case "jpg" => image.output(JpegWriter.Default, config.outputDirectory + s"/$imageNameWithScore.jpg")
-      case "jpeg" => image.output(JpegWriter.Default, config.outputDirectory + s"/$imageNameWithScore.jpeg")
-      case "png" => image.output(PngWriter.NoCompression, config.outputDirectory + s"/$imageNameWithScore.png")
+      case "jpg" => image.output(JpegWriter.Default, outputDirectory + s"/$imageNameWithScore.jpg")
+      case "jpeg" => image.output(JpegWriter.Default, outputDirectory + s"/$imageNameWithScore.jpeg")
+      case "png" => image.output(PngWriter.NoCompression, outputDirectory + s"/$imageNameWithScore.png")
     }
   }
 
-  val configFile = ConfigFactory.load("application.conf")
-
-  val config = Config(
-    configFile.getString("dark-image-filter.input-directory"),
-    configFile.getString("dark-image-filter.output-directory"),
-    configFile.getInt("dark-image-filter.threshold")
-  )
+  val config = {
+    for {
+      configFile        <-    Try(ConfigFactory.load("application.conf"))
+      inputDirectory    <-    Try(configFile.getString("dark-image-filter.input-directory")) if new File(inputDirectory).exists
+      outputDirectory   <-    Try(configFile.getString("dark-image-filter.output-directory")) if new File(outputDirectory).exists
+      threshold         <-    Try(configFile.getInt("dark-image-filter.threshold"))
+    } yield Config(inputDirectory, outputDirectory, threshold)
+  }.recover {
+    case t: Throwable => sys.error(t.getMessage)
+  }.get
 
   new File(config.inputDirectory).listFiles().foreach { file =>
-    processImage(file.getName, ImmutableImage.loader().fromFile(file))
+    processImage(file.getName, ImmutableImage.loader().fromFile(file), config.threshold, config.outputDirectory)
   }
 }
 
