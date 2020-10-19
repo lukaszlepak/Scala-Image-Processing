@@ -1,12 +1,13 @@
 import java.io.File
 
 import com.sksamuel.scrimage.ImmutableImage
+import com.sksamuel.scrimage.color.RGBColor
 import com.sksamuel.scrimage.nio.{JpegWriter, PngWriter}
 import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.Try
+import scala.util.{Random, Try}
 
 
 case class Config(inputDirectory: String, outputDirectory: String, threshold: Int)
@@ -14,10 +15,16 @@ case class Config(inputDirectory: String, outputDirectory: String, threshold: In
 
 object DarkImageFilter extends App {
 
+  def pixelDarkness(color: RGBColor): Double = {
+    255 - (color.blue*0.0722 + color.green*0.7152 + color.red*0.2126)
+  }
+
   def imageDarkness(image: ImmutableImage): Int = {
     val colors = image.colors
-    val brightness = colors.foldLeft(0.0)((sum, color) => sum + color.blue*0.0722 + color.green*0.7152 + color.red*0.2126) / colors.size
-    100 - (brightness * 100 / 255).toInt
+    val sizeOfSampling = (colors.length*0.01).toInt
+
+    val darknessOfSampling = (0 to sizeOfSampling).foldLeft(0.0)( (result, _) => result + pixelDarkness(colors(Random.nextInt(colors.length))) ) /sizeOfSampling
+    (darknessOfSampling * 100 / 255).toInt
   }
 
   def processImage(nameWithExtension: String, image: ImmutableImage, threshold: Int, outputDirectory: String): Future[Unit] = Future {
